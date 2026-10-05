@@ -1,0 +1,20 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  flake-check:
+    # The operator boxes are x86_64-linux, so the checks build there.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      # Builds checks.x86_64-linux.* — the exported module must compose into a
+      # complete system (example) and the reference host must build.
+      - run: nix flake check --print-build-logs
