@@ -43,7 +43,7 @@ let
           url = lib.mkOption {
             type = lib.types.str;
             description = "Git remote the agent works against, cloned on first boot.";
-            example = "git@github.com:alaro-ai/alaro.git";
+            example = "git@github.com:acme/widget.git";
           };
 
           directory = lib.mkOption {

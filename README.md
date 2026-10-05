@@ -40,7 +40,7 @@ Add this repo as an input and import `nixosModules.standalone`.
     home-manager.url = "github:nix-community/home-manager/release-26.05";
     sops-nix.url = "github:Mic92/sops-nix";
 
-    operator.url = "github:alaro-ai/remote-agent-operator";
+    operator.url = "github:pik694/remote-agent-operator";
     # Pin the module's nixpkgs to yours, or you evaluate two nixpkgs trees and
     # can end up with two glibcs in one closure. Do the same for the inputs
     # whose modules you also import (here home-manager).
