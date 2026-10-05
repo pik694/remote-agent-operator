@@ -12,7 +12,7 @@ separate users).
 
 The modules know nothing about secrets, disks or monitoring; a consuming flake
 supplies those. The reference consumer is a separate private repo
-(`remote-operator-setup`), which is also the place to look for the full install
+(`homelab`), which is also the place to look for the full install
 walkthrough (disk, keys, sops, `nixos-anywhere`, `deploy`).
 
 ## What it exports
