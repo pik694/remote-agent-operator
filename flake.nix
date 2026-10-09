@@ -59,6 +59,14 @@
       # `nix flake check` builds this in Linux CI (the operator boxes are
       # x86_64-linux), proving the exported module still composes into a
       # complete, buildable system.
-      checks.x86_64-linux.example = self.nixosConfigurations.example.config.system.build.toplevel;
+      checks.x86_64-linux = {
+        example = self.nixosConfigurations.example.config.system.build.toplevel;
+        network-namespace = nixpkgs.legacyPackages.x86_64-linux.testers.runNixOSTest (
+          import ./tests/network-namespace.nix { inherit self home-manager; }
+        );
+        network-namespace-subnets = import ./tests/network-namespace-subnets.nix {
+          inherit self home-manager nixpkgs;
+        };
+      };
     };
 }

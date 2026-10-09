@@ -143,6 +143,33 @@ let
           };
         };
 
+        network.namespace = {
+          enable = lib.mkEnableOption ''
+            a network namespace of the agent's own, reaching only the internet
+            through the host, so host-level networks (LAN, the host's tailnet)
+            stay out of its reach
+          '';
+
+          nameservers = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [
+              "1.1.1.1"
+              "9.9.9.9"
+            ];
+            description = ''
+              Nameservers the agent's namespace resolves through, instead of
+              the host's (which may be a tailnet or LAN resolver it cannot
+              reach).
+            '';
+          };
+
+          tailscale.enable = lib.mkEnableOption ''
+            a tailscaled of the agent's own inside its namespace, so the agent
+            can join a different tailnet than the host. Log it in once by hand:
+            `sudo tailscale --socket=/run/<user>-tailscale/tailscaled.sock up`
+          '';
+        };
+
         extraHomeConfig = lib.mkOption {
           type = lib.types.deferredModule;
           default = { };
@@ -158,6 +185,7 @@ in
     ./egress-firewall.nix
     ./checkout.nix
     ./claude-service.nix
+    ./network-namespace.nix
     ./home.nix
   ];
 

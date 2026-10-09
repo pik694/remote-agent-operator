@@ -6,6 +6,7 @@ let
     agent:
     let
       paths = import ./paths.nix agent;
+      namespaceUnits = lib.optional agent.network.namespace.enable "${agent.user}-netns.service";
       # `claude remote-control` records its environment ID in this pointer and
       # asks to reuse it on the next start, so open sessions reconnect. But
       # after 10 minutes without reaching Anthropic it gives up, deletes the
@@ -43,8 +44,8 @@ let
     {
       description = "Claude Code Remote Control for ${agent.user} (${agent.repo.directory})";
       wantedBy = [ "multi-user.target" ];
-      requires = [ "${agent.user}-checkout.service" ];
-      after = [ "${agent.user}-checkout.service" ];
+      requires = [ "${agent.user}-checkout.service" ] ++ namespaceUnits;
+      after = [ "${agent.user}-checkout.service" ] ++ namespaceUnits;
       path = [
         "/run/wrappers"
         "/run/current-system/sw"
@@ -110,6 +111,14 @@ let
         MemoryHigh = agent.claudeService.memoryHigh;
         MemoryMax = agent.claudeService.memoryMax;
         TasksMax = 4096;
+      }
+      // lib.optionalAttrs agent.network.namespace.enable {
+        NetworkNamespacePath = paths.networkNamespace;
+        BindReadOnlyPaths = [ "${paths.namespaceResolvConf}:/etc/resolv.conf" ];
+        # nscd answers from the host's namespace with the host's resolvers, so
+        # lookups would bypass the namespace's DNS; without it glibc resolves
+        # through /etc/resolv.conf itself.
+        InaccessiblePaths = [ "-/run/nscd" ];
       };
     };
 in
