@@ -1,9 +1,19 @@
 # An agent with network.namespace.enable runs in its own network namespace,
 # reaching the internet through the host and nothing else. "internet" stands in
 # for a public server and DNS resolver on 198.51.100.1, and also for a LAN,
-# private-range and tailnet neighbour on its other addresses.
+# private-range and tailnet neighbour on its other addresses. It also runs
+# Headscale at https://headscale.example, a control server the agent's
+# tailscaled logs in to with an auth key.
 { self, home-manager }:
+{ pkgs, ... }:
 let
+  headscaleCert = pkgs.runCommand "headscale-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
+    mkdir -p $out
+    openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
+      -out $out/cert.pem -keyout $out/key.pem \
+      -subj '/CN=headscale.example' -addext "subjectAltName=DNS:headscale.example"
+  '';
+  agentAuthKey = "/run/keys/claude-acme-tailscale";
   privateAddresses = {
     lan = "192.168.50.1";
     tenSlashEight = "10.9.0.1";
@@ -36,19 +46,58 @@ in
       networking.firewall.allowedTCPPorts = [
         53
         80
+        443
       ];
-      networking.firewall.allowedUDPPorts = [ 53 ];
+      networking.firewall.allowedUDPPorts = [
+        53
+        3478
+      ];
       services.nginx = {
         enable = true;
         virtualHosts.default.locations."/".return = "200 'internet'";
+        virtualHosts."headscale.example" = {
+          onlySSL = true;
+          sslCertificate = "${headscaleCert}/cert.pem";
+          sslCertificateKey = "${headscaleCert}/key.pem";
+          locations."/" = {
+            proxyPass = "http://127.0.0.1:8080";
+            proxyWebsockets = true;
+          };
+        };
       };
+      services.headscale = {
+        enable = true;
+        port = 8080;
+        settings = {
+          server_url = "https://headscale.example";
+          derp = {
+            server = {
+              enabled = true;
+              region_id = 999;
+              stun_listen_addr = "0.0.0.0:3478";
+            };
+            urls = [ ];
+          };
+          dns = {
+            base_domain = "tailnet";
+            override_local_dns = false;
+          };
+        };
+      };
+      environment.systemPackages = [ pkgs.headscale ];
       services.dnsmasq = {
         enable = true;
         resolveLocalQueries = false;
         settings = {
           interface = "eth1";
           bind-interfaces = true;
-          address = "/work.example/198.51.100.1";
+          # Answer only from the records below; forwarding the rest (AAAA
+          # included) to the VM's offline upstream stalls every lookup.
+          no-resolv = true;
+          address = [
+            "/work.example/198.51.100.1"
+            "/headscale.example/198.51.100.1"
+          ];
         };
       };
     };
@@ -95,9 +144,16 @@ in
           network.namespace = {
             enable = true;
             nameservers = [ "198.51.100.1" ];
-            tailscale.enable = true;
+            tailscale = {
+              enable = true;
+              authKeyFile = agentAuthKey;
+              extraUpFlags = [ "--login-server=https://headscale.example" ];
+            };
           };
         };
+
+        operator.owner = "jdoe";
+        security.pki.certificateFiles = [ "${headscaleCert}/cert.pem" ];
 
         # The test has no GitHub to clone from, no secret store and no Claude
         # login, so the checkout and token are faked and the claude service runs
@@ -139,7 +195,7 @@ in
         box.succeed('test "$(claude-acme-shell -c "readlink /proc/self/ns/net")" = "$(ip netns exec claude-acme readlink /proc/self/ns/net)"')
         box.succeed("claude-acme-shell -c 'getent hosts work.example' | grep 198.51.100.1")
 
-    with subtest("agent's tailscaled runs inside its namespace, waiting for a manual login"):
+    with subtest("agent's tailscaled runs inside its namespace, logged out until its auth key exists"):
         box.wait_for_unit("claude-acme-tailscaled.service")
         box.succeed("ip netns exec claude-acme ip link show tailscale0")
         box.fail("ip link show tailscale0")
@@ -147,6 +203,25 @@ in
             "tailscale --socket=/run/claude-acme-tailscale/tailscaled.sock status --json | grep -E '\"BackendState\": *\"NeedsLogin\"'",
             timeout=60,
         )
+
+    with subtest("agent's long-running units keep the namespace's DNS after the host restarts nscd"):
+        box.succeed("systemctl restart nscd.service")
+        pid = box.succeed("systemctl show -p MainPID --value claude-acme-tailscaled").strip()
+        box.succeed(f"nsenter -t {pid} -m -n getent hosts work.example | grep 198.51.100.1")
+
+    with subtest("agent's tailscaled logs in to its tailnet with its auth key, named <host>-<owner>-claude-agent"):
+        internet.wait_for_unit("headscale.service")
+        internet.wait_for_open_port(443)
+        internet.succeed("headscale users create agents")
+        auth_key = internet.succeed("headscale preauthkeys -u 1 create").strip()
+        box.succeed(f"install -D -m 0400 /dev/stdin ${agentAuthKey} <<< '{auth_key}'")
+        box.succeed("systemctl restart claude-acme-tailscale-autoconnect.service")
+        box.wait_until_succeeds(
+            "tailscale --socket=/run/claude-acme-tailscale/tailscaled.sock status --json | grep -E '\"BackendState\": *\"Running\"'",
+            timeout=120,
+        )
+        internet.succeed("headscale nodes list | grep box-jdoe-claude-agent")
+        box.succeed("ip netns exec claude-acme ip -4 address show tailscale0 | grep 'inet 100\\.'")
 
     for name, address in ${builtins.toJSON privateAddresses}.items():
         with subtest(f"agent namespace cannot reach the {name} neighbour the host reaches"):

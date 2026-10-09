@@ -71,6 +71,8 @@ in
       };
     };
 
+    operator.owner = lib.mkDefault cfg.adminUser;
+
     users.users.${cfg.adminUser} = {
       isNormalUser = true;
       extraGroups = [ "wheel" ];

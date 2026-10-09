@@ -6,7 +6,11 @@ let
     agent:
     let
       paths = import ./paths.nix agent;
-      namespaceUnits = lib.optional agent.network.namespace.enable "${agent.user}-netns.service";
+      namespaceUnits = lib.optionals agent.network.namespace.enable [
+        "${agent.user}-netns.service"
+        # Its /run/nscd mask needs the directory to exist (see network-namespace.nix).
+        "nscd.service"
+      ];
       # `claude remote-control` records its environment ID in this pointer and
       # asks to reuse it on the next start, so open sessions reconnect. But
       # after 10 minutes without reaching Anthropic it gives up, deletes the

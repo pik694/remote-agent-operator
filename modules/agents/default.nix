@@ -5,6 +5,9 @@
 # ../standalone for a complete box.
 { config, lib, ... }:
 let
+  inherit (config.networking) hostName;
+  inherit (config.operator) owner;
+
   agentModule =
     { name, config, ... }:
     {
@@ -168,6 +171,34 @@ let
             can join a different tailnet than the host. Log it in once by hand:
             `sudo tailscale --socket=/run/<user>-tailscale/tailscaled.sock up`
           '';
+
+          tailscale.authKeyFile = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            description = ''
+              File holding a Tailscale auth key for the agent's tailnet, so its
+              tailscaled logs in on its own. Used only while it is logged out.
+            '';
+          };
+
+          tailscale.hostname = lib.mkOption {
+            type = lib.types.str;
+            default = lib.concatStringsSep "-" (
+              [ hostName ] ++ lib.optional (owner != null) owner ++ [ "claude-agent" ]
+            );
+            defaultText = lib.literalExpression ''"<networking.hostName>-<operator.owner>-claude-agent"'';
+            description = ''
+              Name the agent's device gets in its tailnet, so its owner can find
+              it among everyone else's.
+            '';
+          };
+
+          tailscale.extraUpFlags = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+            example = [ "--advertise-tags=tag:agent" ];
+            description = "Extra flags for the automatic `tailscale up`.";
+          };
         };
 
         extraHomeConfig = lib.mkOption {
@@ -199,6 +230,16 @@ in
     claudePackage = lib.mkOption {
       type = lib.types.package;
       description = "Claude Code package the agents and their services use.";
+    };
+
+    owner = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "jdoe";
+      description = ''
+        Who runs this box's agents, used to name them where others see them
+        (for example their devices in a shared tailnet).
+      '';
     };
   };
 

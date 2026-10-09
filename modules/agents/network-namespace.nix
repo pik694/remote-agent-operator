@@ -11,6 +11,9 @@
 let
   agents = lib.filterAttrs (_: a: a.enable && a.network.namespace.enable) config.operator.agents;
   tailscaleAgents = lib.filterAttrs (_: a: a.network.namespace.tailscale.enable) agents;
+  autoconnectAgents = lib.filterAttrs (
+    _: a: a.network.namespace.tailscale.authKeyFile != null
+  ) tailscaleAgents;
   tailscale = config.services.tailscale.package;
 
   unreachableRanges = [
@@ -95,7 +98,10 @@ let
       description = "Tailscale inside the ${agent.user} agent's network namespace";
       wantedBy = [ "multi-user.target" ];
       bindsTo = [ namespaceUnit ];
-      after = [ namespaceUnit ];
+      after = [
+        namespaceUnit
+        "nscd.service"
+      ];
       path = [
         config.networking.firewall.package
         pkgs.iproute2
@@ -111,6 +117,43 @@ let
         InaccessiblePaths = [ "-/run/nscd" ];
         Restart = "on-failure";
       };
+    };
+
+  # Logs the agent's tailscaled in with its auth key whenever it is logged out,
+  # like nixpkgs' tailscaled-autoconnect does for the host's.
+  autoconnectService =
+    agent:
+    let
+      paths = import ./paths.nix agent;
+      cfg = agent.network.namespace.tailscale;
+      tailscaledUnit = "${agent.user}-tailscaled.service";
+      cli = "${tailscale}/bin/tailscale --socket=${paths.tailscaleSocket}";
+    in
+    {
+      description = "Log the ${agent.user} agent's tailscaled in to its tailnet";
+      wantedBy = [ "multi-user.target" ];
+      requires = [ tailscaledUnit ];
+      after = [ tailscaledUnit ];
+      path = [ pkgs.jq ];
+      # A control server it can't reach fails the unit, rather than holding up
+      # boot and switches with a login that never finishes; it retries later.
+      serviceConfig = {
+        Type = "oneshot";
+        Restart = "on-failure";
+        RestartSec = 30;
+      };
+      script = ''
+        set -eu
+        state=
+        for _ in $(seq 60); do
+          state=$(${cli} status --json --peers=false | jq -r .BackendState) || true
+          case "$state" in NeedsLogin|NeedsMachineAuth|Running|Stopped) break ;; esac
+          sleep 1
+        done
+        if [ "$state" = NeedsLogin ] || [ "$state" = NeedsMachineAuth ]; then
+          ${cli} up --timeout=60s --auth-key "file:${cfg.authKeyFile}" --hostname=${lib.escapeShellArg cfg.hostname} ${lib.escapeShellArgs cfg.extraUpFlags}
+        fi
+      '';
     };
 
   # `sudo <user>-shell` opens a login shell as the agent with the same network
@@ -161,6 +204,16 @@ in
       lib.mapAttrs' (_: agent: lib.nameValuePair "${agent.user}-netns" (namespaceService agent)) agents
       // lib.mapAttrs' (
         _: agent: lib.nameValuePair "${agent.user}-tailscaled" (tailscaledService agent)
-      ) tailscaleAgents;
+      ) tailscaleAgents
+      // lib.mapAttrs' (
+        _: agent: lib.nameValuePair "${agent.user}-tailscale-autoconnect" (autoconnectService agent)
+      ) autoconnectAgents
+      // {
+        # The agents' units hide /run/nscd from their own view. systemd would
+        # remove and recreate it on every nscd restart, dropping that mask and
+        # handing the agents the host's resolvers again; kept, only the socket
+        # inside is replaced.
+        nscd.serviceConfig.RuntimeDirectoryPreserve = "yes";
+      };
   };
 }
