@@ -23,6 +23,8 @@ nixosModules.agents      # just the agents, for a fleet with its own base profil
 nixosModules.default     # = standalone
 nixosConfigurations.example          # a buildable box from the module alone
 checks.x86_64-linux.example          # CI builds it (nix flake check)
+checks.x86_64-linux.network-namespace         # VM test of network.namespace
+checks.x86_64-linux.network-namespace-subnets # namespace subnet collision check
 ```
 
 `examples/single-box/configuration.nix` is a complete, buildable worked example;
@@ -103,6 +105,53 @@ since the 6 GB default won't let two coexist on 8 GB. Each agent's Claude and
 Codex logins are established by signing in once as that user — Nix creates the
 account and service, not the license.
 
+## Its own network and tailnet
+
+By default an agent shares the host's network: it reaches the internet and the
+host's tailnet. To give it a tailnet of its own instead — say the box sits in
+your homelab tailnet but the agent needs your work tailnet's databases and
+APIs — give it its own network namespace with a `tailscaled` inside:
+
+```nix
+operator.agents.claude-acme.network.namespace = {
+  enable = true;
+  tailscale.enable = true;
+  # nameservers = [ "1.1.1.1" "9.9.9.9" ];  # until the tailnet's MagicDNS takes over
+};
+```
+
+The namespace (`/run/netns/<user>`) is joined to the host by a veth pair on
+`10.233.<uid mod 256>.0/30` and NATed to the internet only. From inside it, the
+LAN, the other private ranges, the host's tailnet (100.64.0.0/10) and every
+service on the host itself are unreachable. Its DNS is its own
+(`/etc/netns/<user>/resolv.conf`), and nscd is hidden from the agent so lookups
+don't fall back to the host's resolvers.
+
+The agent's `claude remote-control` service, and so every session it spawns,
+runs in the namespace. So does `<user>-tailscaled`, with its own state and
+socket. Log it in once, by hand, to the tailnet the agent should join:
+
+```sh
+sudo tailscale --socket=/run/<user>-tailscale/tailscaled.sock up
+```
+
+Its MagicDNS then applies to the agent only, so `psql -h db.<tailnet>.ts.net`
+works as on a laptop in that tailnet. For a shell with the same view — to log
+in to Claude, run `psql`, or check what the agent sees — use
+
+```sh
+sudo <user>-shell                 # interactive login shell as the agent
+sudo <user>-shell -c 'psql ...'   # one command
+```
+
+Limits:
+
+- Rootless Docker stays in the host's namespace (the user service manager can't
+  join another one), so containers reach the internet but neither tailnet.
+- Agents on one host need uids that differ modulo 256; the build fails
+  otherwise.
+- The firewall rules use iptables, like the rest of the module.
+
 ## Security model
 
 Agents run arbitrary code as their own unprivileged user, so the box treats each
@@ -114,7 +163,7 @@ rules apply per agent.
 | Accounts | The agent has no sudo, isn't a Nix trusted user, and can't read other home folders (`700`). |
 | SSH login | The agent accepts only its own key; the build fails if it matches the admin key. Agent forwarding is disabled. |
 | Claude service sandbox | The service sees and writes only its own home. The rest of the system is read-only, other homes are hidden, `/tmp` is private, there are no capabilities or setuid, and kernel settings are protected. Syscall groups agents never need (clock, modules, raw I/O, reboot, swap and others) are denied. Memory is capped (6 GB by default). `systemd-analyze security <user>` rates it 2.6. |
-| Network | The agent can reach the internet and the tailnet, plus DNS. Anything else on the LAN or other private ranges is rejected (one iptables chain per agent, keyed on its uid). |
+| Network | The agent can reach the internet and the tailnet, plus DNS. Anything else on the LAN or other private ranges is rejected (one iptables chain per agent, keyed on its uid). With `network.namespace`, the agent's service runs in a namespace that reaches the internet and its own tailnet only, and what it still runs on the host (Docker) is kept off the host's tailnet too. |
 | Docker | Rootless: the daemon runs as the agent (a lingering user service), not root, and the agent isn't in the `docker` group. Containers get only the agent's permissions and follow the network rules above. The socket lives under the agent's home, because the service's `ProtectHome=tmpfs` blanks `/run/user`. |
 | Secrets | The GitHub token is read from a path the consumer supplies, readable only by the agent. SSH keys and model logins stay in the agent's home, `600`. |
 
@@ -131,7 +180,8 @@ What this does **not** protect against:
   bubblewrap mounting `/proc`. This is deliberate; to switch, remove
   `ProtectKernelTunables`, `ProtectKernelLogs` and `ProtectHostname`, and
   install `bubblewrap`.
-- The tailnet. Restrict what the box can reach with a Tailscale ACL.
+- The tailnet. Restrict what the box can reach with a Tailscale ACL, or give
+  the agent its own (see "Its own network and tailnet").
 
 ## Layout
 
@@ -140,3 +190,4 @@ What this does **not** protect against:
 | `modules/agents/` | The agent template: `operator.agents.<name>` options and the per-agent user, checkout, egress, Docker and Claude service |
 | `modules/standalone/` | `operator.standalone`: admin user, SSH, Tailscale, boot and Nix settings for a whole box |
 | `examples/single-box/` | A complete box from the module alone; the CI check builds it |
+| `tests/` | NixOS VM and evaluation tests run by `nix flake check` |
