@@ -112,6 +112,9 @@ let
         StateDirectory = baseNameOf paths.tailscaleStateDir;
         StateDirectoryMode = "0700";
         RuntimeDirectory = baseNameOf (dirOf paths.tailscaleSocket);
+        # The agent's units mount this directory over /run/tailscale; removing
+        # it on a restart would drop that mount (see the host's tailscaled below).
+        RuntimeDirectoryPreserve = "yes";
         NetworkNamespacePath = paths.networkNamespace;
         BindPaths = [ "${paths.namespaceResolvConf}:/etc/resolv.conf" ];
         InaccessiblePaths = [ "-/run/nscd" ];
@@ -168,11 +171,17 @@ let
       exec ${config.systemd.package}/bin/systemd-run "$io" --wait --collect --quiet \
         --uid=${agent.user} \
         -p WorkingDirectory=${paths.home} \
-        -p NetworkNamespacePath=${paths.networkNamespace} \
-        -p BindReadOnlyPaths=${paths.namespaceResolvConf}:/etc/resolv.conf \
-        -p InaccessiblePaths=-/run/nscd \
+        ${lib.escapeShellArgs (namespaceViewProperties agent)} \
         -- ${pkgs.bashInteractive}/bin/bash -l "$@"
     '';
+
+  namespaceViewProperties =
+    agent:
+    lib.concatLists (
+      lib.mapAttrsToList (name: values: map (value: "--property=${name}=${value}") (lib.toList values)) (
+        import ./namespace-view.nix { inherit lib; } agent
+      )
+    );
 
   rejectHostInput = agent: "iptables -I INPUT -i ${(veth agent).hostInterface} -j REJECT";
   removeHostInput =
@@ -214,6 +223,11 @@ in
         # handing the agents the host's resolvers again; kept, only the socket
         # inside is replaced.
         nscd.serviceConfig.RuntimeDirectoryPreserve = "yes";
+      }
+      // lib.optionalAttrs config.services.tailscale.enable {
+        # Likewise for /run/tailscale, which the agents' units cover with their
+        # own tailscaled's directory or hide.
+        tailscaled.serviceConfig.RuntimeDirectoryPreserve = "yes";
       };
   };
 }

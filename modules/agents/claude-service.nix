@@ -11,6 +11,9 @@ let
         # Its /run/nscd mask needs the directory to exist (see network-namespace.nix).
         "nscd.service"
       ];
+      # Only ordered after, not bound to: the service keeps running through a
+      # restart of the agent's tailscaled.
+      tailscaleUnits = lib.optional agent.network.namespace.tailscale.enable "${agent.user}-tailscaled.service";
       # `claude remote-control` records its environment ID in this pointer and
       # asks to reuse it on the next start, so open sessions reconnect. But
       # after 10 minutes without reaching Anthropic it gives up, deletes the
@@ -49,7 +52,8 @@ let
       description = "Claude Code Remote Control for ${agent.user} (${agent.repo.directory})";
       wantedBy = [ "multi-user.target" ];
       requires = [ "${agent.user}-checkout.service" ] ++ namespaceUnits;
-      after = [ "${agent.user}-checkout.service" ] ++ namespaceUnits;
+      wants = tailscaleUnits;
+      after = [ "${agent.user}-checkout.service" ] ++ namespaceUnits ++ tailscaleUnits;
       path = [
         "/run/wrappers"
         "/run/current-system/sw"
@@ -116,14 +120,9 @@ let
         MemoryMax = agent.claudeService.memoryMax;
         TasksMax = 4096;
       }
-      // lib.optionalAttrs agent.network.namespace.enable {
-        NetworkNamespacePath = paths.networkNamespace;
-        BindReadOnlyPaths = [ "${paths.namespaceResolvConf}:/etc/resolv.conf" ];
-        # nscd answers from the host's namespace with the host's resolvers, so
-        # lookups would bypass the namespace's DNS; without it glibc resolves
-        # through /etc/resolv.conf itself.
-        InaccessiblePaths = [ "-/run/nscd" ];
-      };
+      // lib.optionalAttrs agent.network.namespace.enable (
+        import ./namespace-view.nix { inherit lib; } agent
+      );
     };
 in
 {

@@ -124,6 +124,10 @@ in
           }
         ];
 
+        # The host's own tailscaled, never logged in, which the agent must not
+        # mistake for its own.
+        services.tailscale.enable = true;
+
         # A host service open on every interface, as Ollama or sshd would be.
         networking.firewall.allowedTCPPorts = [ 80 ];
         services.nginx = {
@@ -166,7 +170,8 @@ in
         systemd.services.claude-acme.serviceConfig.ExecStart = lib.mkForce (
           lib.getExe (
             pkgs.writeShellScriptBin "lookup-work-example" ''
-              getent hosts work.example > /home/claude-acme/lookup || echo failed > /home/claude-acme/lookup
+              until getent hosts work.example > /home/claude-acme/lookup; do sleep 5; done
+              exec sleep infinity
             ''
           )
         );
@@ -198,7 +203,6 @@ in
     with subtest("agent's tailscaled runs inside its namespace, logged out until its auth key exists"):
         box.wait_for_unit("claude-acme-tailscaled.service")
         box.succeed("ip netns exec claude-acme ip link show tailscale0")
-        box.fail("ip link show tailscale0")
         box.wait_until_succeeds(
             "tailscale --socket=/run/claude-acme-tailscale/tailscaled.sock status --json | grep -E '\"BackendState\": *\"NeedsLogin\"'",
             timeout=60,
@@ -215,13 +219,25 @@ in
         internet.succeed("headscale users create agents")
         auth_key = internet.succeed("headscale preauthkeys -u 1 create").strip()
         box.succeed(f"install -D -m 0400 /dev/stdin ${agentAuthKey} <<< '{auth_key}'")
-        box.succeed("systemctl restart claude-acme-tailscale-autoconnect.service")
+        # The unit retries every 30 seconds; a slow first attempt may time out.
+        box.execute("systemctl restart claude-acme-tailscale-autoconnect.service")
         box.wait_until_succeeds(
             "tailscale --socket=/run/claude-acme-tailscale/tailscaled.sock status --json | grep -E '\"BackendState\": *\"Running\"'",
-            timeout=120,
+            timeout=240,
         )
         internet.succeed("headscale nodes list | grep box-jdoe-claude-agent")
         box.succeed("ip netns exec claude-acme ip -4 address show tailscale0 | grep 'inet 100\\.'")
+        box.fail("ip -4 address show tailscale0 | grep 'inet 100\\.'")
+
+    with subtest("agent's tailscale CLI talks to its own tailscaled, not the host's, across daemon restarts"):
+        box.succeed("claude-acme-shell -c 'tailscale status --self --peers=false' | grep box-jdoe-claude-agent")
+        service_pid = box.succeed("systemctl show -p MainPID --value claude-acme.service").strip()
+        box.succeed(f"nsenter -t {service_pid} -m tailscale status --self --peers=false | grep box-jdoe-claude-agent")
+        box.succeed("systemctl restart tailscaled.service claude-acme-tailscaled.service")
+        box.wait_until_succeeds(
+            f"nsenter -t {service_pid} -m tailscale status --self --peers=false | grep box-jdoe-claude-agent",
+            timeout=120,
+        )
 
     for name, address in ${builtins.toJSON privateAddresses}.items():
         with subtest(f"agent namespace cannot reach the {name} neighbour the host reaches"):
