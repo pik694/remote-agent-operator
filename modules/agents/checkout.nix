@@ -1,16 +1,18 @@
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, utils, ... }:
 let
   enabled = lib.filterAttrs (_: a: a.enable) config.operator.agents;
 
   gitKeysService = agent:
     let
       paths = import ./paths.nix agent;
+      # Home Manager escapes the user name in its unit name ("-" becomes "\x2d").
+      homeManagerUnit = "home-manager-${utils.escapeSystemdPath agent.user}.service";
     in
     {
       description = "Create the ${agent.user} GitHub keys and local signing trust";
       wantedBy = [ "multi-user.target" ];
-      requires = [ "home-manager-${agent.user}.service" ];
-      after = [ "home-manager-${agent.user}.service" ];
+      requires = [ homeManagerUnit ];
+      after = [ homeManagerUnit ];
       path = [
         pkgs.openssh
         pkgs.coreutils
