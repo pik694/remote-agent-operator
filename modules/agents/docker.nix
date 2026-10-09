@@ -2,12 +2,59 @@
 # virtualisation.docker.rootless is host-global (a single user service and
 # socket), so at most one agent per host can use it this way. Per-agent Docker
 # would need a custom per-user daemon; this is the honest limit for now.
+#
+# An agent with network.namespace gets the same rootless daemon as a system
+# service in its namespace instead: a user service can't join a namespace, and
+# a daemon left on the host publishes container ports where the agent can't
+# reach them and sends container traffic out past its namespace.
 { config, pkgs, lib, ... }:
 let
   dockerAgents = lib.filterAttrs (_: a: a.enable && a.docker.enable) config.operator.agents;
   names = lib.attrNames dockerAgents;
   agent = lib.head (lib.attrValues dockerAgents);
   paths = import ./paths.nix agent;
+  rootless = config.virtualisation.docker.rootless;
+  namespaced = agent.network.namespace.enable;
+  uid = toString agent.uid;
+
+  namespacedDaemon = {
+    description = "Rootless Docker for the ${agent.user} agent, in its network namespace";
+    wantedBy = [ "multi-user.target" ];
+    requires = [
+      "${agent.user}-netns.service"
+      "user-runtime-dir@${uid}.service"
+    ];
+    after = [
+      "${agent.user}-netns.service"
+      "user-runtime-dir@${uid}.service"
+      "nscd.service"
+    ];
+    # newuidmap and newgidmap are setuid wrappers.
+    path = [ "/run/wrappers" ] ++ rootless.extraPackages;
+    environment = {
+      HOME = paths.home;
+      XDG_RUNTIME_DIR = "/run/user/${uid}";
+    };
+    serviceConfig = {
+      User = agent.user;
+      Type = "notify";
+      NotifyAccess = "all";
+      ExecStartPre = "${pkgs.coreutils}/bin/install -d -m 700 ${paths.dockerSocketDir}";
+      ExecStart = "${rootless.package}/bin/dockerd-rootless --config-file=${
+        (pkgs.formats.json { }).generate "daemon.json" rootless.daemon.settings
+      }";
+      ExecReload = "${pkgs.procps}/bin/kill -s HUP $MAINPID";
+      TimeoutSec = 0;
+      Restart = "always";
+      RestartSec = 2;
+      LimitNOFILE = "infinity";
+      LimitNPROC = "infinity";
+      LimitCORE = "infinity";
+      Delegate = true;
+      KillMode = "mixed";
+    }
+    // import ./namespace-view.nix { inherit lib; } agent;
+  };
 in
 {
   config = lib.mkMerge [
@@ -34,6 +81,7 @@ in
       };
 
       systemd.user.services.docker = {
+        enable = !namespaced;
         # The service is defined for every user, but only this agent needs a
         # daemon and only it can write the socket directory.
         unitConfig.ConditionUser = lib.mkForce agent.user;
@@ -41,6 +89,8 @@ in
         # systemd-tmpfiles would be a race on the first start after a rebuild.
         serviceConfig.ExecStartPre = "${pkgs.coreutils}/bin/install -d -m 700 ${paths.dockerSocketDir}";
       };
+
+      systemd.services = lib.mkIf namespaced { "${agent.user}-docker" = namespacedDaemon; };
     })
   ];
 }

@@ -14,6 +14,28 @@ let
       -subj '/CN=headscale.example' -addext "subjectAltName=DNS:headscale.example"
   '';
   agentAuthKey = "/run/keys/claude-acme-tailscale";
+
+  # A container serving "container" on port 80, loaded from the store rather
+  # than pulled, since the test has no registry.
+  probeImage = pkgs.dockerTools.buildImage {
+    name = "probe-http";
+    tag = "latest";
+    copyToRoot = pkgs.buildEnv {
+      name = "probe-http-root";
+      paths = [
+        pkgs.pkgsStatic.busybox
+        (pkgs.writeTextDir "srv/index.html" "container")
+      ];
+    };
+    config.Cmd = [
+      "/bin/httpd"
+      "-f"
+      "-p"
+      "80"
+      "-h"
+      "/srv"
+    ];
+  };
   privateAddresses = {
     lan = "192.168.50.1";
     tenSlashEight = "10.9.0.1";
@@ -145,6 +167,7 @@ in
           githubTokenFile = "/run/secrets/gh-acme";
           githubTokenEnvFile = "/run/secrets/claude-acme.env";
           claudeService.enable = true;
+          docker.enable = true;
           network.namespace = {
             enable = true;
             nameservers = [ "198.51.100.1" ];
@@ -236,6 +259,15 @@ in
         box.succeed("systemctl restart tailscaled.service claude-acme-tailscaled.service")
         box.wait_until_succeeds(
             f"nsenter -t {service_pid} -m tailscale status --self --peers=false | grep box-jdoe-claude-agent",
+            timeout=120,
+        )
+
+    with subtest("agent's containers publish their ports on its namespace's loopback, as testcontainers expects"):
+        box.wait_until_succeeds("claude-acme-shell -c 'docker info' >/dev/null", timeout=300)
+        box.succeed("claude-acme-shell -c 'docker load -i ${probeImage}'")
+        box.succeed("claude-acme-shell -c 'docker run -d --name probe -p 80 probe-http:latest'")
+        box.wait_until_succeeds(
+            "claude-acme-shell -c 'curl -sf --max-time 5 http://127.0.0.1:$(docker port probe 80/tcp | head -1 | sed \"s/.*://\")/' | grep container",
             timeout=120,
         )
 
