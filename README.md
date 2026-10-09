@@ -103,7 +103,53 @@ it: `claude-acme` (the `claude remote-control` service), `claude-acme-checkout`
 host runs more than one agent, lower each agent's `claudeService.memoryMax`,
 since the 6 GB default won't let two coexist on 8 GB. Each agent's Claude and
 Codex logins are established by signing in once as that user — Nix creates the
-account and service, not the license.
+account and service, not the license (see "Bringing an agent up").
+
+## Bringing an agent up
+
+After the first deploy with a new agent (here `claude-acme`, working on
+`widget`), as the admin on the box:
+
+1. **Register its GitHub keys.** `claude-acme-git-keys` has created them;
+   print the public halves:
+   ```sh
+   sudo cat ~claude-acme/.ssh/widget-gh-auth.pub ~claude-acme/.ssh/widget-gh-signing.pub
+   ```
+   On the GitHub account the agent acts as, add the first as an
+   **Authentication** key and the second as a **Signing** key. (A deploy key
+   works for the first if the repository accepts them.) `claude-acme-checkout`
+   retries every minute and clones the repository once GitHub accepts the key;
+   `systemctl status claude-acme-checkout` shows when it has.
+2. **Join its tailnet** — only with `network.namespace.tailscale.enable`, and
+   only without an `authKeyFile` (with one, `claude-acme-tailscale-autoconnect`
+   has already logged it in):
+   ```sh
+   sudo tailscale --socket=/run/claude-acme-tailscale/tailscaled.sock up \
+     --hostname=<host>-<owner>-claude-agent
+   ```
+   and open the printed link with the account of the tailnet the agent should
+   join.
+3. **Sign in as the agent.** Open a shell as `claude-acme`: `sudo
+   claude-acme-shell` with `network.namespace`, otherwise `sudo -iu
+   claude-acme`. In it:
+   1. `cd ~/widget && claude auth login`, then start `claude` once and accept
+      the workspace trust prompt.
+   2. Run `claude remote-control` once, accept its confirmation, and stop it
+      with Ctrl-C; from now on the service runs it.
+   3. Optionally `codex login --device-auth` (device code login has to be
+      enabled in the ChatGPT account's security settings).
+   4. Check `claude auth status`, `gh auth status` and, if signed in,
+      `codex login status`.
+4. **Start the service** with the new login and check it:
+   ```sh
+   sudo systemctl restart claude-acme
+   systemctl status claude-acme
+   ```
+   The box now shows up as an environment in `claude.ai/code` and the Claude
+   app.
+
+The keys have no passphrase, so the agent can use them after a reboot. A
+reinstall creates new keys and a new login: repeat these steps.
 
 ## Its own network and tailnet
 
@@ -115,7 +161,12 @@ APIs — give it its own network namespace with a `tailscaled` inside:
 ```nix
 operator.agents.claude-acme.network.namespace = {
   enable = true;
-  tailscale.enable = true;
+  tailscale = {
+    enable = true;
+    authKeyFile = config.sops.secrets.claude-acme-tailscale-auth-key.path;  # optional
+    # hostname = "...";        # default: <networking.hostName>-<operator.owner>-claude-agent
+    # extraUpFlags = [ "--advertise-tags=tag:agent" ];
+  };
   # nameservers = [ "1.1.1.1" "9.9.9.9" ];  # until the tailnet's MagicDNS takes over
 };
 ```
@@ -129,11 +180,15 @@ don't fall back to the host's resolvers.
 
 The agent's `claude remote-control` service, and so every session it spawns,
 runs in the namespace. So does `<user>-tailscaled`, with its own state and
-socket. Log it in once, by hand, to the tailnet the agent should join:
+socket. With an `authKeyFile`, `<user>-tailscale-autoconnect` logs it in
+whenever it is logged out (a reusable or pre-approved key from the tailnet the
+agent should join); a control server it can't reach fails that unit, which
+retries every 30 seconds, rather than holding up boot or a deploy. Without
+one, log it in once by hand (see "Bringing an agent up").
 
-```sh
-sudo tailscale --socket=/run/<user>-tailscale/tailscaled.sock up
-```
+Its device is named `<networking.hostName>-<operator.owner>-claude-agent`, so
+its owner can find it in a shared tailnet; `operator.owner` defaults to the
+standalone module's admin user.
 
 Its MagicDNS then applies to the agent only, so `psql -h db.<tailnet>.ts.net`
 works as on a laptop in that tailnet. For a shell with the same view — to log
@@ -151,6 +206,9 @@ Limits:
 - Agents on one host need uids that differ modulo 256; the build fails
   otherwise.
 - The firewall rules use iptables, like the rest of the module.
+- The host's nscd keeps `/run/nscd` across restarts (`RuntimeDirectoryPreserve`),
+  so the agent's units stay cut off from it; otherwise every nscd restart would
+  hand them the host's resolvers again.
 
 ## Security model
 
