@@ -3,7 +3,7 @@
 # chain per agent, keyed on its uid.
 #
 # An agent with its own network namespace reaches its tailnet from there, so
-# what it still runs in the host's namespace (rootless Docker, sudo -u) is kept
+# what it still runs in the host's namespace (sudo -u, an SSH login) is kept
 # off the host's tailnet too.
 { config, lib, ... }:
 let

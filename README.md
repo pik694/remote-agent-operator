@@ -201,8 +201,10 @@ sudo <user>-shell -c 'psql ...'   # one command
 
 Limits:
 
-- Rootless Docker stays in the host's namespace (the user service manager can't
-  join another one), so containers reach the internet but neither tailnet.
+- Rootless Docker (`docker.enable`) runs as a system service, `<user>-docker`,
+  inside the namespace instead of as a user service, so published container
+  ports are on the agent's own loopback (as testcontainers expects) and
+  containers reach the internet and the agent's tailnet only.
 - Agents on one host need uids that differ modulo 256; the build fails
   otherwise.
 - The firewall rules use iptables, like the rest of the module.
@@ -221,8 +223,8 @@ rules apply per agent.
 | Accounts | The agent has no sudo, isn't a Nix trusted user, and can't read other home folders (`700`). |
 | SSH login | The agent accepts only its own key; the build fails if it matches the admin key. Agent forwarding is disabled. |
 | Claude service sandbox | The service sees and writes only its own home. The rest of the system is read-only, other homes are hidden, `/tmp` is private, there are no capabilities or setuid, and kernel settings are protected. Syscall groups agents never need (clock, modules, raw I/O, reboot, swap and others) are denied. Memory is capped (6 GB by default). `systemd-analyze security <user>` rates it 2.6. |
-| Network | The agent can reach the internet and the tailnet, plus DNS. Anything else on the LAN or other private ranges is rejected (one iptables chain per agent, keyed on its uid). With `network.namespace`, the agent's service runs in a namespace that reaches the internet and its own tailnet only, and what it still runs on the host (Docker) is kept off the host's tailnet too. |
-| Docker | Rootless: the daemon runs as the agent (a lingering user service), not root, and the agent isn't in the `docker` group. Containers get only the agent's permissions and follow the network rules above. The socket lives under the agent's home, because the service's `ProtectHome=tmpfs` blanks `/run/user`. |
+| Network | The agent can reach the internet and the tailnet, plus DNS. Anything else on the LAN or other private ranges is rejected (one iptables chain per agent, keyed on its uid). With `network.namespace`, the agent's service runs in a namespace that reaches the internet and its own tailnet only, and what it still runs on the host (`sudo -u`, an SSH login) is kept off the host's tailnet too. |
+| Docker | Rootless: the daemon runs as the agent (a lingering user service, or with `network.namespace` a system service in the agent's namespace), not root, and the agent isn't in the `docker` group. Containers get only the agent's permissions and follow the network rules above. The socket lives under the agent's home, because the service's `ProtectHome=tmpfs` blanks `/run/user`. |
 | Secrets | The GitHub token is read from a path the consumer supplies, readable only by the agent. SSH keys and model logins stay in the agent's home, `600`. |
 
 What this does **not** protect against:
