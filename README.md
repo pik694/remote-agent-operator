@@ -98,8 +98,9 @@ it: `claude-acme` (the `claude remote-control` service), `claude-acme-checkout`
 (clones the repo once GitHub accepts the key) and `claude-acme-git-keys`
 (creates the per-repo auth and signing keys on first boot).
 
-**Per-host limits:** uids must be unique; at most one agent may set
-`docker.enable = true` (nixpkgs' rootless Docker is host-global); and when a
+**Per-host limits:** uids must be unique; at most one agent without
+`network.namespace` may set `docker.enable = true` (nixpkgs' rootless Docker
+is host-global; namespaced agents each get their own daemon); and when a
 host runs more than one agent, lower each agent's `claudeService.memoryMax`,
 since the 6 GB default won't let two coexist on 8 GB. Each agent's Claude and
 Codex logins are established by signing in once as that user — Nix creates the
@@ -204,7 +205,8 @@ Limits:
 - Rootless Docker (`docker.enable`) runs as a system service, `<user>-docker`,
   inside the namespace instead of as a user service, so published container
   ports are on the agent's own loopback (as testcontainers expects) and
-  containers reach the internet and the agent's tailnet only.
+  containers reach the internet and the agent's tailnet only. Every
+  namespaced agent on a host can have one.
 - Agents on one host need uids that differ modulo 256; the build fails
   otherwise.
 - The firewall rules use iptables, like the rest of the module.

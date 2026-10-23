@@ -100,8 +100,10 @@ let
             default = false;
             description = ''
               Rootless Docker for this agent, so tests can start containers
-              without the agent gaining root-equivalent access. At most one
-              agent per host may enable this (see docker.nix).
+              without the agent gaining root-equivalent access. Every agent
+              with network.namespace gets a daemon of its own; at most one
+              agent per host without a namespace may enable this (see
+              docker.nix).
             '';
           };
         };
