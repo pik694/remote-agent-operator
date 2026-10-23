@@ -67,6 +67,9 @@
         network-namespace-subnets = import ./tests/network-namespace-subnets.nix {
           inherit self home-manager nixpkgs;
         };
+        docker-agents = import ./tests/docker-agents.nix {
+          inherit self home-manager nixpkgs;
+        };
       };
     };
 }
