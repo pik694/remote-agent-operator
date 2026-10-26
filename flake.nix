@@ -70,6 +70,9 @@
         docker-agents = import ./tests/docker-agents.nix {
           inherit self home-manager nixpkgs;
         };
+        claude-dev-shell = import ./tests/claude-dev-shell.nix {
+          inherit self home-manager nixpkgs;
+        };
       };
     };
 }

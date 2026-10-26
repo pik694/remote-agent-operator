@@ -90,8 +90,17 @@ operator.agents.claude-acme = {
   githubTokenEnvFile = config.sops.templates."claude-acme.env".path; # GH_TOKEN=...
   docker.enable = true;              # rootless Docker for tests (see limits)
   claudeService.enable = true;
+  claudeService.devShell = "agent";  # optional: sessions get the repo flake's devShell
 };
 ```
+
+With `claudeService.devShell`, the service runs `claude remote-control` inside
+`nix develop <checkout>#<devShell>`, so every session it starts finds the
+repository's own toolchain (its Node, Python, cloud CLIs) on `PATH` instead of
+only what the box installs. The environment is built when the service starts:
+a change to the flake reaches sessions after the next restart, and while the
+flake fails to evaluate the service keeps restarting. The first start
+downloads the whole devShell.
 
 An agent whose user is `claude-acme` produces three systemd units named after
 it: `claude-acme` (the `claude remote-control` service), `claude-acme-checkout`
