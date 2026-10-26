@@ -45,8 +45,17 @@ let
             fi
           fi
         done &
-        exec ${config.operator.claudePackage}/bin/claude remote-control --spawn worktree --capacity ${toString agent.claudeService.capacity}
+        exec ${devShellPrefix}${config.operator.claudePackage}/bin/claude remote-control --spawn worktree --capacity ${toString agent.claudeService.capacity}
       '';
+      devShellPrefix = lib.optionalString (agent.claudeService.devShell != null) (
+        lib.escapeShellArgs [
+          "${config.nix.package}/bin/nix"
+          "develop"
+          "${paths.repoPath}#${agent.claudeService.devShell}"
+          "--command"
+        ]
+        + " "
+      );
     in
     {
       description = "Claude Code Remote Control for ${agent.user} (${agent.repo.directory})";

@@ -146,6 +146,21 @@ let
               agents. Lower this when a host runs more than one agent.
             '';
           };
+
+          devShell = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            example = "agent";
+            description = ''
+              A devShell of the checkout's own flake to run claude
+              remote-control in, so every session it starts gets the
+              repository's toolchain on PATH (`nix develop <checkout>#<name>`).
+              The environment is built when the service starts: a change to the
+              flake reaches sessions after the next restart, and a flake that
+              fails to evaluate keeps the service restarting until it is fixed.
+              Null runs claude with the system's tools only.
+            '';
+          };
         };
 
         network.namespace = {
