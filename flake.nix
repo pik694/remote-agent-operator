@@ -76,6 +76,9 @@
         claude-dev-shell = import ./tests/claude-dev-shell.nix {
           inherit self home-manager nixpkgs;
         };
+        claude-permission-mode = import ./tests/claude-permission-mode.nix {
+          inherit self home-manager nixpkgs;
+        };
       };
     };
 }

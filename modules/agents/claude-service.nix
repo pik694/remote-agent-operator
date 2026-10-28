@@ -45,8 +45,11 @@ let
             fi
           fi
         done &
-        exec ${devShellPrefix}${config.operator.claudePackage}/bin/claude remote-control --spawn worktree --capacity ${toString agent.claudeService.capacity}
+        exec ${devShellPrefix}${config.operator.claudePackage}/bin/claude remote-control --spawn worktree --capacity ${toString agent.claudeService.capacity}${permissionModeFlag}
       '';
+      permissionModeFlag = lib.optionalString (agent.claudeService.permissionMode != null) (
+        " --permission-mode ${agent.claudeService.permissionMode}"
+      );
       devShellPrefix = lib.optionalString (agent.claudeService.devShell != null) (
         lib.escapeShellArgs [
           "${config.nix.package}/bin/nix"

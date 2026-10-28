@@ -91,6 +91,7 @@ operator.agents.claude-acme = {
   docker.enable = true;              # rootless Docker for tests (see limits)
   claudeService.enable = true;
   claudeService.devShell = "agent";  # optional: sessions get the repo flake's devShell
+  claudeService.permissionMode = "auto"; # optional: the mode new sessions start in
 };
 ```
 
