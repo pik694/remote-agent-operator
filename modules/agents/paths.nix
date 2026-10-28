@@ -20,5 +20,6 @@ in
   authKey = "${home}/.ssh/${cfg.repo.directory}-gh-auth";
   signingKey = "${home}/.ssh/${cfg.repo.directory}-gh-signing";
   allowedSigners = "${home}/.config/git/allowed_signers";
-  bridgePointer = "${home}/.claude/projects/${projectDir}/bridge-pointer.json";
+  claudeCredentials = "${home}/.claude/.credentials.json";
+  bridgePointer ="${home}/.claude/projects/${projectDir}/bridge-pointer.json";
 }

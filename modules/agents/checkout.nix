@@ -1,6 +1,7 @@
 { config, pkgs, lib, utils, ... }:
 let
   enabled = lib.filterAttrs (_: a: a.enable) config.operator.agents;
+  cloneRetrySeconds = 60;
 
   gitKeysService = agent:
     let
@@ -72,8 +73,11 @@ let
         pkgs.coreutils
       ];
       environment.HOME = paths.home;
+      # Until GitHub accepts the new key the clone keeps retrying inside a
+      # running unit rather than failing, so the first deploy, which creates
+      # that key, doesn't see a failed unit and roll itself back.
       serviceConfig = {
-        Type = "oneshot";
+        Type = "simple";
         User = agent.user;
         WorkingDirectory = paths.home;
         UMask = "0077";
@@ -102,7 +106,11 @@ let
         export GIT_SSH_COMMAND="${pkgs.openssh}/bin/ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -i ${paths.authKey}"
         staging=$(mktemp -d ${paths.home}/.${agent.repo.directory}-clone.XXXXXX)
         trap 'rm -rf -- "$staging"' EXIT
-        git clone "$url" "$staging/${agent.repo.directory}"
+        until git clone "$url" "$staging/${agent.repo.directory}"; do
+          rm -rf -- "$staging/${agent.repo.directory}"
+          echo "Cannot clone $url yet; retrying in ${toString cloneRetrySeconds}s. Register ${paths.authKey}.pub with GitHub if it isn't." >&2
+          sleep ${toString cloneRetrySeconds}
+        done
         mv "$staging/${agent.repo.directory}" "$repo"
       '';
     };

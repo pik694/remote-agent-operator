@@ -103,9 +103,12 @@ flake fails to evaluate the service keeps restarting. The first start
 downloads the whole devShell.
 
 An agent whose user is `claude-acme` produces three systemd units named after
-it: `claude-acme` (the `claude remote-control` service), `claude-acme-checkout`
-(clones the repo once GitHub accepts the key) and `claude-acme-git-keys`
-(creates the per-repo auth and signing keys on first boot).
+it: `claude-acme` (the `claude remote-control` service, skipped until the
+checkout exists and the agent has signed in to Claude), `claude-acme-checkout`
+(clones the repo once GitHub accepts the key, waiting rather than failing until
+then) and `claude-acme-git-keys` (creates the per-repo auth and signing keys on
+first boot). So the first deploy succeeds before anyone has registered the keys
+or signed in.
 
 **Per-host limits:** uids must be unique; at most one agent without
 `network.namespace` may set `docker.enable = true` (nixpkgs' rootless Docker
