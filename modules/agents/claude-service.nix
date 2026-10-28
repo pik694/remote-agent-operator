@@ -63,6 +63,13 @@ let
       requires = [ "${agent.user}-checkout.service" ] ++ namespaceUnits;
       wants = tailscaleUnits;
       after = [ "${agent.user}-checkout.service" ] ++ namespaceUnits ++ tailscaleUnits;
+      # Skipped rather than failing until the checkout exists and the agent has
+      # signed in to Claude, so deploys before then don't roll back; the
+      # sign-in steps end with a restart that starts it.
+      unitConfig.ConditionPathExists = [
+        paths.repoPath
+        paths.claudeCredentials
+      ];
       path = [
         "/run/wrappers"
         "/run/current-system/sw"

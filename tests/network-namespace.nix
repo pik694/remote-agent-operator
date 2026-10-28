@@ -183,13 +183,18 @@ in
         security.pki.certificateFiles = [ "${headscaleCert}/cert.pem" ];
 
         # The test has no GitHub to clone from, no secret store and no Claude
-        # login, so the checkout and token are faked and the claude service runs
-        # a name lookup in its place, through the same sandbox and namespace.
+        # login, so the checkout and token are faked, the claude service doesn't
+        # wait for a login and runs a name lookup in its place, through the same
+        # sandbox and namespace.
         systemd.tmpfiles.rules = [
           "d /run/secrets 0755 root root -"
           "f /run/secrets/claude-acme.env 0400 claude-acme users -"
         ];
-        systemd.services.claude-acme-checkout.script = lib.mkForce "mkdir -p /home/claude-acme/widget";
+        systemd.services.claude-acme-checkout = {
+          script = lib.mkForce "mkdir -p /home/claude-acme/widget";
+          serviceConfig.Type = lib.mkForce "oneshot";
+        };
+        systemd.services.claude-acme.unitConfig.ConditionPathExists = lib.mkForce [ "/home/claude-acme/widget" ];
         systemd.services.claude-acme.serviceConfig.ExecStart = lib.mkForce (
           lib.getExe (
             pkgs.writeShellScriptBin "lookup-work-example" ''

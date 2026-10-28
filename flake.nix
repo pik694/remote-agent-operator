@@ -64,6 +64,9 @@
         network-namespace = nixpkgs.legacyPackages.x86_64-linux.testers.runNixOSTest (
           import ./tests/network-namespace.nix { inherit self home-manager; }
         );
+        first-deploy = nixpkgs.legacyPackages.x86_64-linux.testers.runNixOSTest (
+          import ./tests/first-deploy.nix { inherit self home-manager; }
+        );
         network-namespace-subnets = import ./tests/network-namespace-subnets.nix {
           inherit self home-manager nixpkgs;
         };
