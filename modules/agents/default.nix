@@ -161,6 +161,29 @@ let
               Null runs claude with the system's tools only.
             '';
           };
+
+          permissionMode = lib.mkOption {
+            type = lib.types.nullOr (
+              lib.types.enum [
+                "acceptEdits"
+                "auto"
+                "bypassPermissions"
+                "default"
+                "dontAsk"
+                "plan"
+              ]
+            );
+            default = null;
+            example = "auto";
+            description = ''
+              Permission mode the sessions this service starts begin in, passed
+              as `claude remote-control --permission-mode`; it outranks the
+              agent's settings files. The Claude apps can switch a running
+              session to any mode but `bypassPermissions`. Where auto mode
+              isn't available, `auto` starts sessions in `default` instead.
+              Null leaves the mode to the agent's settings files.
+            '';
+          };
         };
 
         network.namespace = {
